@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Car Damage Estimator</title>
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; padding: 20px; }
+        #preview { max-width: 300px; margin: 20px auto; border: 1px solid #ccc; }
+        #result { margin-top: 20px; max-width: 600px; margin: 0 auto; }
+        .report { border: 2px solid #333; padding: 15px; background: #f9f9f9; border-radius: 5px; }
+        .report h2 { margin: 0 0 10px; }
+        .report p { margin: 5px 0; font-size: 16px; }
+        button { padding: 10px 20px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; }
+        button:hover { background: #0056b3; }
+    </style>
+</head>
+<body>
+    <h1>Car Damage Estimator</h1>
+    <p>Upload an image of your damaged car</p>
+    <input type="file" id="imageInput" accept="image/*" onchange="processImage()">
+    <img id="preview" src="" alt="Preview" style="display: none;">
+    <div id="result"></div>
+
+    <script>
+        const repairCosts = {
+            "Toyota": {
+                "Dent": { "Minor": 300, "Moderate": 500, "Severe": 800 },
+                "Scratch": { "Minor": 150, "Moderate": 300, "Severe": 500 },
+                "Front Bumper": { "Minor": 400, "Moderate": 600, "Severe": 900 },
+                "Hood": { "Minor": 500, "Moderate": 800, "Severe": 1200 }
+            },
+            "Honda": {
+                "Dent": { "Minor": 280, "Moderate": 480, "Severe": 750 },
+                "Scratch": { "Minor": 140, "Moderate": 280, "Severe": 450 },
+                "Front Bumper": { "Minor": 380, "Moderate": 580, "Severe": 850 },
+                "Hood": { "Minor": 480, "Moderate": 750, "Severe": 1100 }
+            },
+            "Ford": {
+                "Dent": { "Minor": 320, "Moderate": 520, "Severe": 820 },
+                "Scratch": { "Minor": 160, "Moderate": 320, "Severe": 520 },
+                "Front Bumper": { "Minor": 420, "Moderate": 620, "Severe": 920 },
+                "Hood": { "Minor": 520, "Moderate": 820, "Severe": 1250 }
+            },
+            "BMW": {
+                "Dent": { "Minor": 350, "Moderate": 600, "Severe": 950 },
+                "Scratch": { "Minor": 200, "Moderate": 400, "Severe": 600 },
+                "Front Bumper": { "Minor": 500, "Moderate": 750, "Severe": 1100 },
+                "Hood": { "Minor": 600, "Moderate": 950, "Severe": 1400 }
+            }
+        };
+
+        const API_KEY = "AIzaSyCnA6g5dNFT7FRckSgjzRhTujpNUnE_e68";
+
+        async function processImage() {
+            const input = document.getElementById("imageInput");
+            const preview = document.getElementById("preview");
+            const resultDiv = document.getElementById("result");
+
+            if (input.files && input.files[0]) {
+                const file = input.files[0];
+                preview.src = URL.createObjectURL(file);
+                preview.style.display = "block";
+
+                preview.onload = async () => {
+                    const detectedBrand = await detectBrand(file);
+                    const damageResult = detectDamage(); // Simplified damage detection
+                    const estimatedCost = repairCosts[detectedBrand]?.[damageResult.type]?.[damageResult.severity] || 500;
+
+                    const report = {
+                        carBrand: detectedBrand,
+                        damageType: damageResult.type,
+                        damageSeverity: damageResult.severity,
+                        damagedArea: damageResult.area,
+                        estimatedCost: `$${estimatedCost}`
+                    };
+
+                    resultDiv.innerHTML = `
+                        <div class="report">
+                            <h2>Damage Report</h2>
+                            <p><strong>Car Brand:</strong> ${report.carBrand}</p>
+                            <p><strong>Damage Type:</strong> ${report.damageType}</p>
+                            <p><strong>Severity:</strong> ${report.damageSeverity}</p>
+                            <p><strong>Damaged Area:</strong> ${report.damagedArea}</p>
+                            <p><strong>Estimated Cost:</strong> ${report.estimatedCost}</p>
+                            <button onclick='generateJSON(${JSON.stringify(report)})'>Download JSON Report</button>
+                        </div>
+                    `;
+                };
+            }
+        }
+
+        async function detectBrand(file) {
+            const base64Image = await fileToBase64(file);
+            const proxyUrl = "https://cors-anywhere.herokuapp.com/";
+            const apiUrl = `https://vision.googleapis.com/v1/images:annotate?key=${API_KEY}`;
+            const url = proxyUrl + apiUrl;
+
+            try {
+                const response = await fetch(url, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        requests: [{
+                            image: { content: base64Image },
+                            features: [
+                                { type: "LOGO_DETECTION", maxResults: 5 },
+                                { type: "LABEL_DETECTION", maxResults: 5 }
+                            ]
+                        }]
+                    })
+                });
+
+                if (!response.ok) throw new Error("API request failed");
+
+                const data = await response.json();
+                const logo = data.responses[0].logoAnnotations?.[0]?.description;
+                if (logo) {
+                    if (logo.toLowerCase().includes("bmw")) return "BMW";
+                    if (logo.toLowerCase().includes("toyota")) return "Toyota";
+                    if (logo.toLowerCase().includes("honda")) return "Honda";
+                    if (logo.toLowerCase().includes("ford")) return "Ford";
+                    return logo;
+                }
+
+                const labels = data.responses[0].labelAnnotations || [];
+                for (const label of labels) {
+                    const desc = label.description.toLowerCase();
+                    if (desc.includes("bmw")) return "BMW";
+                    if (desc.includes("toyota")) return "Toyota";
+                    if (desc.includes("honda")) return "Honda";
+                    if (desc.includes("ford")) return "Ford";
+                }
+                return "Unknown";
+            } catch (error) {
+                console.error("Error:", error);
+                return "Unknown";
+            }
+        }
+
+        function detectDamage() {
+            // Simple demo damage detection (randomized for simplicity)
+            const types = ["Dent", "Scratch"];
+            const severities = ["Minor", "Moderate", "Severe"];
+            const areas = ["Front Bumper", "Hood", "Door", "Rear Bumper"];
+
+            const type = types[Math.floor(Math.random() * types.length)];
+            const severity = severities[Math.floor(Math.random() * severities.length)];
+            const area = areas[Math.floor(Math.random() * areas.length)];
+
+            return { type, severity, area };
+        }
+
+        function fileToBase64(file) {
+            return new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result.split(",")[1]);
+                reader.readAsDataURL(file);
+            });
+        }
+
+        function generateJSON(report) {
+            const jsonString = JSON.stringify(report, null, 2);
+            const blob = new Blob([jsonString], { type: "application/json" });
+            const link = document.createElement("a");
+            link.href = URL.createObjectURL(blob);
+            link.download = "damage_report.json";
+            link.click();
+        }
+    </script>
+</body>
+</html>
